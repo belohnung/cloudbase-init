@@ -1040,7 +1040,7 @@ class WindowsUtils(base.BaseOSUtils):
             conn.MSFT_NetIPAddress.create(
                 AddressFamily=family, InterfaceAlias=name, IPAddress=address,
                 PrefixLength=prefix_len)
-            
+
             # Create default route separately for link-local gateway
             LOG.debug(
                 "Creating default route via link-local IPv6 gateway \"%(gw)s\" "
@@ -1055,6 +1055,9 @@ class WindowsUtils(base.BaseOSUtils):
                 PolicyStore=0  # PersistentStore
             )
         else:
+            LOG.debug(
+                "Creating IPv6 address with default gateway",
+                {"gw": gateway, "name": name})
             # Normal case - set DefaultGateway parameter
             conn.MSFT_NetIPAddress.create(
                 AddressFamily=family, InterfaceAlias=name, IPAddress=address,
