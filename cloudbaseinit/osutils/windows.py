@@ -15,6 +15,7 @@
 import contextlib
 import ctypes
 from ctypes import wintypes
+import ipaddress
 import os
 import re
 import struct
@@ -1018,9 +1019,46 @@ class WindowsUtils(base.BaseOSUtils):
                 {"route": existing_route.DestinationPrefix, "name": name})
             existing_route.Delete_()
 
-        conn.MSFT_NetIPAddress.create(
-            AddressFamily=family, InterfaceAlias=name, IPAddress=address,
-            PrefixLength=prefix_len, DefaultGateway=gateway)
+        # Check if gateway is IPv6 link-local, which requires special handling
+        is_ipv6_link_local_gateway = False
+        if gateway and family == AF_INET6:
+            try:
+                gateway_addr = ipaddress.IPv6Address(gateway)
+                is_ipv6_link_local_gateway = gateway_addr.is_link_local
+            except (ValueError, ipaddress.AddressValueError) as e:
+                LOG.warning(
+                    "Invalid IPv6 gateway address \"%(gw)s\": %(error)s",
+                    {"gw": gateway, "error": e})
+
+        # Create IP address - for link-local gateways, don't set DefaultGateway
+        # as WMI will reject it for being on different subnet
+        if is_ipv6_link_local_gateway:
+            LOG.debug(
+                "Creating IPv6 address without default gateway due to "
+                "link-local gateway \"%(gw)s\" on interface \"%(name)s\"",
+                {"gw": gateway, "name": name})
+            conn.MSFT_NetIPAddress.create(
+                AddressFamily=family, InterfaceAlias=name, IPAddress=address,
+                PrefixLength=prefix_len)
+            
+            # Create default route separately for link-local gateway
+            LOG.debug(
+                "Creating default route via link-local IPv6 gateway \"%(gw)s\" "
+                "on interface \"%(name)s\"",
+                {"gw": gateway, "name": name})
+            conn.MSFT_NetRoute.create(
+                AddressFamily=AF_INET6,
+                InterfaceAlias=name,
+                DestinationPrefix="::/0",
+                NextHop=gateway,
+                RouteMetric=1,
+                PolicyStore=0  # PersistentStore
+            )
+        else:
+            # Normal case - set DefaultGateway parameter
+            conn.MSFT_NetIPAddress.create(
+                AddressFamily=family, InterfaceAlias=name, IPAddress=address,
+                PrefixLength=prefix_len, DefaultGateway=gateway)
 
     def set_static_network_config(self, name, address, prefix_len_or_netmask,
                                   gateway, dnsnameservers):
